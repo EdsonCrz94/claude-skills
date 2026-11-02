@@ -1,11 +1,11 @@
 ---
 name: power-apps-sharepoint
-description: Use when designing, building, reviewing or fixing Power Apps canvas apps, Power Fx formulas, or SharePoint / Microsoft Lists data models (lists, columns, indexes, REST provisioning, delegation).
+description: Use when designing, building, reviewing or fixing Power Apps canvas apps, Power Fx formulas, or SharePoint / Microsoft Lists data models (lists, columns, indexes, REST provisioning, delegation), including the mandatory admin configuration module for system parameters.
 ---
 
 # Power Apps + SharePoint (Microsoft Lists) conventions
 
-This skill defines how to build canvas apps on top of SharePoint lists: naming, controls, UI structure, data modeling, delegation, and known platform traps. Apply every rule unless the user explicitly overrides it for the task at hand.
+This skill defines how to build canvas apps on top of SharePoint lists: naming, controls, UI structure, data modeling, the mandatory configuration module, delegation, and known platform traps. Apply every rule unless the user explicitly overrides it for the task at hand.
 
 All examples use generic placeholders: `<SiteUrl>`, `<AppCode>`, `<Module>`, `<Entity>`, `<ListName>`, `<ColumnName>`. Never invent real site URLs, tenant names, users, emails, or business data.
 
@@ -38,7 +38,7 @@ All examples use generic placeholders: `<SiteUrl>`, `<AppCode>`, `<Module>`, `<E
 | Global variable | `gbl<Name>` | `gblCurrentUser`, `gblNavKey` |
 | Context variable | `loc<Name>` | `locPanelOpen` |
 | Collection | `col<Name>` | `colAuditItems` |
-| Named formula (App.Formulas) | `nf<Name>` or a descriptive noun | `nfTheme`, `nfCanApprove` |
+| Named formula (App.Formulas) | `nf<Name>` or a descriptive noun | `nfTheme`, `nfCfg`, `nfCanApprove` |
 | Power Automate flow | `<AppCode>_<Module>_<Action>` | `<AppCode>_Orders_UploadEvidence` |
 
 **Optional module segment.** Control names are global across the whole app, not per screen. When an app has several modules, insert a short module code after the prefix (`lblHrsEventsTitle`, `galPrepQueue`). This prevents Power Apps from auto-renaming duplicates with `_1` suffixes.
@@ -190,6 +190,7 @@ nfTheme = {
 | List | `<AppCode>_<Module>_<Entity>` (PascalCase segments) | `<AppCode>_Orders_Headers` |
 | Security list | `<AppCode>_Sec_<Entity>` | `<AppCode>_Sec_UserRoles` |
 | Catalog list | `<AppCode>_Cat_<Entity>` or `<AppCode>_<Module>_<Entity>` | `<AppCode>_Cat_Departments` |
+| Configuration list | `<AppCode>_Cfg_<Entity>` | `<AppCode>_Cfg_Settings` |
 | Column | PascalCase, no spaces, English | `ShippingDate`, `ParentID`, `IsActive` |
 | Boolean column | `Is<X>` / `Has<X>` / `Can<X>` | `IsActive`, `CanApprove` |
 | Foreign key column | `<ParentEntity>ID` | `OrderID`, `AuditID` |
@@ -200,7 +201,7 @@ nfTheme = {
 
 ### 5.2 Data model principles
 
-- **Layers.** Separate lists into layers: **security** (users, roles, capability flags), **catalog / master** (slow-changing reference data), **transactional** (records created by the app), and **log / history** (append-only events).
+- **Layers.** Separate lists into layers: **security** (users, roles, capability flags), **catalog / master** (slow-changing reference data), **configuration** (system parameters edited by administrators, §6), **transactional** (records created by the app), and **log / history** (append-only events).
 - **Capability flags.** Model permissions as capability flags (`CanCreate`, `CanApprove`) on a roles list. Formulas ask "can this user do X?", never "is the role equal to 'Admin'?".
 - **Status vs. outcome.** Separate *progress* (`Status`) from *result* (`Outcome`); do not overload one column with both.
 - **Snapshots.** Snapshot reference values (standards, weights, item text) into the transactional row at creation time. Later catalog changes must not rewrite history.
@@ -254,16 +255,190 @@ When building lists programmatically with the SharePoint REST API:
 
 ---
 
-## 6. Delegation
+## 6. App configuration module (mandatory)
 
-### 6.1 Principles
+Every app ships with a configuration module. Business parameters live in a SharePoint list that administrators edit from inside the app, never as literals in formulas or flows. If the app sends a reminder every 15 days, `15` is a setting that an administrator can change to 7 or 30 without opening the app in the editor or touching a flow.
+
+### 6.1 What counts as a setting
+
+A value is a setting when a business user could reasonably ask to change it without a redesign:
+
+- Frequencies and intervals (reminder every N days, escalation after N hours).
+- Thresholds and limits (approval amount, maximum attachments, score cut-offs, tolerances).
+- Deadlines and SLAs.
+- Recipients (shared mailboxes, distribution lists). Prefer a role or group over an individual person.
+- Feature switches (enable a module, require evidence before closing).
+- Texts that change with policy (notification subjects and bodies, help texts).
+
+Not settings:
+
+- **Structural changes** (new columns, screens, or Choice options that need new logic). Those are releases.
+- **Secrets** (passwords, API keys, connection strings). Every app user can read the settings list, so secrets never go there.
+- **Deployment values** that differ between dev, test and prod (site URL, list IDs). Those belong in Power Platform environment variables of the solution, not in the business settings list.
+
+### 6.2 The settings list
+
+`<AppCode>_Cfg_Settings`, one row per setting:
+
+| Column | Type | Indexed | Description |
+|---|---|---|---|
+| `Title` | Single line of text, unique | Yes | Setting key, `<Module>_<Name>` in PascalCase (`Notifications_ReminderIntervalDays`). Never renamed after release, because formulas and flows look it up by this text. |
+| `Module` | Choice | Yes | Module that owns the setting. Groups rows on the admin screen. |
+| `DataType` | Choice: `Number`, `Text`, `Boolean`, `Date` | No | Which value column holds the value and which input the admin screen shows. |
+| `ValueNumber` | Number | No | Value when `DataType = Number`. |
+| `ValueText` | Multiple lines of text (plain) | No | Value when `DataType = Text`. |
+| `ValueBoolean` | Yes/No | No | Value when `DataType = Boolean`. |
+| `ValueDate` | Date only | No | Value when `DataType = Date`. |
+| `DisplayLabel` | Single line of text | No | Spanish label shown to administrators. |
+| `HelpText` | Multiple lines of text (plain) | No | Spanish explanation: what the setting controls and what happens when it changes. |
+| `Unit` | Single line of text | No | Spanish unit shown next to the input (`días`, `horas`, `%`). |
+| `MinValue` / `MaxValue` | Number | No | Allowed range for Number settings. Blank means no limit. |
+| `IsEditable` | Yes/No | No | `No` makes the row read-only on the admin screen (technical values shown for reference). |
+
+- **Typed value columns.** Use one value column per data type, not a single text column. Formulas and flows read the value without parsing, and SharePoint validates the type.
+- **Seeding.** Create every key with its default value when provisioning the list (part of the §5.5 script). Record key, default and allowed range in the data dictionary.
+- **Audit.** Turn on versioning for the list. Version history records who changed which value and when. Add an append-only `<AppCode>_Cfg_SettingsLog` list only if the app itself must show that history.
+- **Scalars only.** The settings list holds single values. Repeating reference data (departments, reasons, product types) stays in catalog lists (§5.2), administered from the same module.
+
+### 6.3 Access control
+
+- **Capability flag.** Add `CanManageSettings` to the roles list (§5.2) and expose it as a named formula (`nfCanManageSettings`). Formulas check the flag, never a role name.
+- **In the app.** Show the sidebar entry only when `nfCanManageSettings` is true. Also guard each admin screen, so a deep link or a stale navigation cannot open it:
+
+```
+// scr_admin_settings.OnVisible
+If(!nfCanManageSettings, Navigate(<HomeScreen>));
+Set(gblScreenTitle, "Configuración");
+Set(gblNavKey, "adminSettings")
+```
+
+- **In SharePoint.** Hiding a screen is not security: any user with Edit on the list can change parameters directly in SharePoint. Break permission inheritance on the settings, security and catalog lists. App users get Read; only administrators get Edit.
+
+### 6.4 Admin screens
+
+The configuration module is a normal module (top bar, sidebar, theme, naming rules) with at least:
+
+| Screen | Purpose |
+|---|---|
+| `scr_admin_settings` | System parameters from `<AppCode>_Cfg_Settings`, grouped by `Module`. |
+| `scr_admin_users` | Users, roles and capability flags from the security lists. |
+| `scr_admin_catalogs` | Catalog lists: add, edit, and deactivate with `IsActive`. Never delete catalog rows that transactions reference. |
+
+When the app has few settings, users and catalogs, these can be one screen with a tab list.
+
+Settings screen pattern:
+
+- **Gallery.** `galAdmSettings` lists the settings of the active module: `DisplayLabel`, current value with `Unit`, and the last change (`Modified`, `Modified By`).
+- **Edit panel.** Selecting a row sets `gblCurrentSetting` and opens a panel with only the input that matches `DataType` (`numAdmSettingValue`, `txtAdmSettingValue`, `tglAdmSettingValue`, `dtAdmSettingValue`, each with `Visible` driven by `DataType`). Show `HelpText` below the input.
+- **Validation.** Save is enabled only when the row is editable and a Number value is inside `MinValue` / `MaxValue`. Also disable it while the input still equals the stored value, so `Notify` fires only on a real change (§4.4).
+
+```
+// btnAdmSettingsSave.DisplayMode
+With(
+    {
+        t: gblCurrentSetting.DataType.Value,
+        n: numAdmSettingValue.Value
+    },
+    If(
+        gblCurrentSetting.IsEditable &&
+        // Number values must be present and inside the allowed range
+        (
+            t <> "Number" ||
+            (
+                !IsBlank(n) &&
+                (IsBlank(gblCurrentSetting.MinValue) || n >= gblCurrentSetting.MinValue) &&
+                (IsBlank(gblCurrentSetting.MaxValue) || n <= gblCurrentSetting.MaxValue)
+            )
+        ) &&
+        // The input must differ from the stored value
+        !Switch(
+            t,
+            "Number",  n = gblCurrentSetting.ValueNumber,
+            "Text",    txtAdmSettingValue.Text = gblCurrentSetting.ValueText,
+            "Boolean", tglAdmSettingValue.Checked = gblCurrentSetting.ValueBoolean,
+            "Date",    dtAdmSettingValue.SelectedDate = gblCurrentSetting.ValueDate
+        ),
+        DisplayMode.Edit,
+        DisplayMode.Disabled
+    )
+)
+
+// btnAdmSettingsSave.OnSelect
+With(
+    {t: gblCurrentSetting.DataType.Value},
+    Set(
+        gblCurrentSetting,
+        Patch(
+            <AppCode>_Cfg_Settings,
+            gblCurrentSetting,
+            {
+                ValueNumber:  If(t = "Number",  numAdmSettingValue.Value,       gblCurrentSetting.ValueNumber),
+                ValueText:    If(t = "Text",    txtAdmSettingValue.Text,        gblCurrentSetting.ValueText),
+                ValueBoolean: If(t = "Boolean", tglAdmSettingValue.Checked,     gblCurrentSetting.ValueBoolean),
+                ValueDate:    If(t = "Date",    dtAdmSettingValue.SelectedDate, gblCurrentSetting.ValueDate)
+            }
+        )
+    )
+);
+Refresh(<AppCode>_Cfg_Settings);
+Notify("Se actualizó «" & gblCurrentSetting.DisplayLabel & "».", NotificationType.Success)
+```
+
+The patch record has the same shape in every case (each column keeps its stored value unless it is the active type). This avoids a `Switch` whose branches return records with different columns.
+
+### 6.5 Reading settings in the app
+
+Expose settings as one named-formula record, the same way as the theme (§4.3):
+
+```
+// App.Formulas
+nfCfg = {
+    ReminderIntervalDays: LookUp(<AppCode>_Cfg_Settings, Title = "Notifications_ReminderIntervalDays").ValueNumber,
+    MaxAttachments:       LookUp(<AppCode>_Cfg_Settings, Title = "Evidence_MaxAttachments").ValueNumber,
+    IsEvidenceRequired:   LookUp(<AppCode>_Cfg_Settings, Title = "Evidence_IsRequired").ValueBoolean
+};
+```
+
+- **No literals.** Formulas use `nfCfg.<Name>`. No formula contains a business value as a literal.
+- **Delegation.** `Title = "<key>"` delegates, and the list is small.
+- **No hidden fallbacks.** Do not write `Coalesce(nfCfg.ReminderIntervalDays, 15)`. A fallback reintroduces the hard-coded value and hides a missing key. A missing key is fixed by adding the row.
+- **Freshness.** After a save, `Refresh(<AppCode>_Cfg_Settings)` makes the current session read the new value. Other open sessions pick it up when the app restarts.
+
+### 6.6 Reading settings in flows
+
+- **Run-time read.** Flows read each setting when they run, with *Get items* on `<AppCode>_Cfg_Settings`, Filter Query `Title eq '<key>'`, Top Count 1. Never type the value into the flow.
+- **Schedules.** The *Recurrence* trigger cannot take its interval from a list. For "every N days" behavior, schedule the flow daily and decide inside it which records are due, using a `LastNotifiedOn` date column (indexed) on the record:
+
+```
+Trigger      Recurrence: every 1 day
+Get items    Get_ReminderIntervalDays
+             List: <AppCode>_Cfg_Settings
+             Filter Query: Title eq 'Notifications_ReminderIntervalDays'
+             Top Count: 1
+Compose      CutoffDate
+             addDays(utcNow(), mul(-1, int(first(body('Get_ReminderIntervalDays')?['value'])?['ValueNumber'])), 'yyyy-MM-dd')
+Get items    Get_DueRecords
+             List: <AppCode>_<Module>_<Entity>
+             Filter Query: LastNotifiedOn le '@{outputs('CutoffDate')}' or LastNotifiedOn eq null
+Apply to each due record
+             Send the notification
+             Update item: LastNotifiedOn = utcNow()
+```
+
+When an administrator changes the interval from 15 to 7 days, the next daily run already uses 7, and nobody edits the flow. If the setting row is missing, `int()` fails and the flow run fails visibly instead of silently using a wrong value.
+
+---
+
+## 7. Delegation
+
+### 7.1 Principles
 
 - Always write **delegable formulas first**. Non-delegable queries silently process only the first N rows. N is 500 by default and at most 2,000 via *Settings → General → Data row limit*.
 - The authoritative check is **App Checker → Formulas**. Canvas warning triangles mix accessibility and performance issues and can mislead.
 - Filter at the source, then shape locally. `Filter` / `LookUp` first; `AddColumns`, `ForAll` and heavy transforms only on the reduced set.
 - `ClearCollect(col, <List>)` materializes at most the row limit. Never collect a whole large list and then filter the collection.
 
-### 6.2 SharePoint delegation quick reference
+### 7.2 SharePoint delegation quick reference
 
 | Pattern | Delegable? |
 |---|---|
@@ -280,7 +455,7 @@ When building lists programmatically with the SharePoint REST API:
 | `First` / `FirstN` applied *before* `Filter` | **No** |
 | `Filter` on a collection | Not applicable (local, but limited to what was collected) |
 
-### 6.3 Preferred patterns
+### 7.3 Preferred patterns
 
 - **Search.** Use `StartsWith` on an indexed text column instead of `Search()` or `in`.
 - **Tab or filter switching.** Instead of `Filter(Switch(var, "a", Filter(...), "b", Filter(...)))`, write one `Filter` over the list whose predicates encode each branch with delegable conditions. Alternatively, use separate galleries toggled with `Visible`.
@@ -288,7 +463,7 @@ When building lists programmatically with the SharePoint REST API:
 - **Sorting.** Prefer `Sort(<source>, <ColumnReference>)`. `SortByColumns` requires the **internal** column name as text, which can differ from the display name.
 - **Keys and variables.** Compare key columns against a variable, not a nested lookup. Pre-compute values with `With()` or `Set()`.
 
-### 6.4 Mandatory reporting when a warning is unavoidable
+### 7.4 Mandatory reporting when a warning is unavoidable
 
 When a formula cannot be made delegable, say so explicitly next to the formula, in this format:
 
@@ -305,7 +480,7 @@ To test delegation for real, look up a record known to sit beyond the row limit.
 
 ---
 
-## 7. Known platform traps
+## 8. Known platform traps
 
 - **Choice columns:**
   - Read with `.Value` and write with `{Value: "<Option>"}`.
@@ -337,7 +512,7 @@ To test delegation for real, look up a record known to sit beyond the row limit.
 
 ---
 
-## 8. Definition of done (checklist)
+## 9. Definition of done (checklist)
 
 Before delivering any app change, list schema, or formula, confirm:
 
@@ -348,5 +523,7 @@ Before delivering any app change, list schema, or formula, confirm:
 - [ ] No literal colors: all colors come from the theme record.
 - [ ] Lists are named `<AppCode>_<Module>_<Entity>`, columns are PascalCase, and every column has an English description.
 - [ ] Every filter, sort or search column is indexed. Relationships use `<Parent>ID` Number columns (or Lookup, with justification).
-- [ ] App Checker → Formulas shows no delegation warnings, or each one is reported in the §6.4 format.
+- [ ] The app has a configuration module (§6). No business parameter (interval, threshold, limit, recipient, switch) is a literal in a formula or flow; formulas read `nfCfg`, flows read `<AppCode>_Cfg_Settings` at run time.
+- [ ] Admin screens are gated by `CanManageSettings`, and only administrators have Edit on the settings, security and catalog lists.
+- [ ] App Checker → Formulas shows no delegation warnings, or each one is reported in the §7.4 format.
 - [ ] No real URLs, tenant names, user names or business data appear in shared artifacts; placeholders are used instead.

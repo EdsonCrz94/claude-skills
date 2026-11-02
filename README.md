@@ -8,7 +8,7 @@ A skill is a folder with a `SKILL.md` file: YAML frontmatter that tells Claude w
 
 | Skill | What it does |
 |---|---|
-| [`power-apps-sharepoint`](power-apps-sharepoint/) | Conventions for building Power Apps canvas apps on SharePoint / Microsoft Lists: control naming, modern-control policy, reusable top bar and sidebar, list and column design, indexes, foreign keys, delegation rules, and known platform traps. |
+| [`power-apps-sharepoint`](power-apps-sharepoint/) | Conventions for building Power Apps canvas apps on SharePoint / Microsoft Lists: control naming, modern-control policy, reusable top bar and sidebar, list and column design, indexes, foreign keys, a mandatory admin configuration module, delegation rules, and known platform traps. |
 
 ### power-apps-sharepoint
 
@@ -20,7 +20,8 @@ What it covers:
 - **Language split.** Technical names in English, end-user text in Spanish.
 - **Controls.** Modern controls by default, with explicit criteria for when a classic control is justified.
 - **UI.** Minimalist layout with a reusable top bar and sidebar, and a single theme record so no control holds a literal color.
-- **Data model.** List and column naming, mandatory column descriptions, layer separation (security, catalog, transactional, log), capability flags for permissions, and snapshotting reference values into transactional rows.
+- **Data model.** List and column naming, mandatory column descriptions, layer separation (security, catalog, configuration, transactional, log), capability flags for permissions, and snapshotting reference values into transactional rows.
+- **Configuration module (mandatory).** Every app gets admin screens and a settings list for its business parameters (intervals, thresholds, recipients, switches), so a reminder "every 15 days" can become 7 or 30 without editing the app or its flows. Includes the list schema, access control, the edit-screen formulas, and the daily-flow pattern for schedules that must follow a setting.
 - **Indexes and foreign keys.** Index every column used to filter, sort or search. Relate lists with an indexed `<Parent>ID` Number column by default; Lookup columns as the documented alternative.
 - **Delegation.** A quick-reference table of what does and does not delegate against SharePoint, preferred delegable patterns, and a required reporting format for any warning that cannot be avoided.
 - **Platform traps.** Choice column read/write asymmetry, gallery scroll persistence, `TemplateSize` limits, attachments outside an `EditForm`, REST provisioning quirks, and more.
